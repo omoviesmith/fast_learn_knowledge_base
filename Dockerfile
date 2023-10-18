@@ -30,4 +30,5 @@ COPY . .
 EXPOSE 8000
 
 # Define the command to start the app using gunicorn
-CMD ["gunicorn", "--bind", ":8000", "app:app"]
+# CMD ["gunicorn", "--bind", ":8000", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "120", "--workers", "4", "app:app"]
