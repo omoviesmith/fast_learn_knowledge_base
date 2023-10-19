@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import urllib.request
-from langchain.docstore.document import Document
 import time
 import boto3
 import os
@@ -11,6 +9,7 @@ from langchain.embeddings import CohereEmbeddings
 from langchain.document_loaders import UnstructuredFileLoader, PyPDFLoader
 from langchain.vectorstores import Qdrant
 from werkzeug.utils import secure_filename
+from langchain.document_loaders import TextLoader
 
 # Loading environment variables
 openai_api_key = os.environ.get('openai_api_key')
@@ -19,6 +18,67 @@ qdrant_url = os.environ.get('qdrant_url')
 qdrant_api_key = os.environ.get('qdrant_api_key')
 AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+
+
+def pdf_2_text(input_pdf_file, history, collection_name):
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+
+    s3_client = boto3.client('s3', 
+                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
+                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
+                      region_name='us-east-1')
+    textract_client = boto3.client('textract', 
+                            aws_access_key_id=AWS_ACCESS_KEY_ID, 
+                            aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
+                            region_name='us-east-1')
+    history = history or []
+    default_bucket_name = "myflash" 
+    output_file = "output.txt"
+   
+    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file))
+    
+    try:
+        response = s3_client.upload_file(input_pdf_file, default_bucket_name, key)
+    except NoCredentialsError as e:
+        print("Error uploading file to S3:", e)
+        return history, "Error uploading file to S3: {}".format(e), "None"
+        
+    s3_object = {'Bucket': default_bucket_name, 'Name': key}
+    
+    response = textract_client.start_document_analysis(
+        DocumentLocation={'S3Object': s3_object},
+        FeatureTypes=['TABLES', 'FORMS']
+    )
+    job_id = response['JobId']
+    
+    while True:
+        response = textract_client.get_document_analysis(JobId=job_id)
+        status = response['JobStatus']
+        if status in ['SUCCEEDED', 'FAILED']:
+            break
+        time.sleep(5)
+
+    if status == 'SUCCEEDED':
+        with open(output_file, 'w') as output_file_io:
+            for block in response['Blocks']:
+                if block['BlockType'] in ['LINE', 'WORD']:
+                    output_file_io.write(block['Text'] + '\n')
+
+        with open(output_file, "r") as file:
+            first_512_chars = file.read(512).replace("\n", "").replace("\r", "").replace("[", "").replace("]", "") + " [...]"
+            history.append(("Document conversion", first_512_chars))
+
+        loader = TextLoader(output_file)
+        docs = loader.load()
+
+        embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
+        qdrant = Qdrant.from_documents(docs, embeddings, url=qdrant_url, collection_name=collection_name, prefer_grpc=True, api_key=qdrant_api_key)
+        os.remove(output_file) # Delete downloaded file
+        collection_name = qdrant.collection_name
+        return history, first_512_chars, collection_name
+
+    return history, "Failed to convert document", "None"
 
 
 #Flask config
@@ -32,75 +92,21 @@ def hello_world():
 
 
 @app.route('/ocr', methods=['POST'])
-def ocr_route():
-    data = request.form.to_dict()
-    collection_name = data['collection_name']
-    bucket_name = data['bucket_name']
-    file_path = data['file_path']
-
-    # Get the file from the request
-    file = request.files['file']
-    local_file_path = secure_filename(file.filename)
-    file.save(local_file_path)
-
-    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-
-    s3 = boto3.client('s3', 
-                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
-                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
-                      region_name='us-east-1')
-
-    # Upload file to S3
-    try:
-        s3.upload_file(local_file_path, bucket_name, file_path)
-        print(f'Successfully uploaded {file_path} to {bucket_name}')
-        os.remove(local_file_path) # remove local file after upload
-    except FileNotFoundError:
-        return jsonify({'error': 'The file was not found'}), 400
-    except NoCredentialsError:
-        return jsonify({'error': 'Credentials not available'}), 400
-
-    textract = boto3.client('textract', 
-                            aws_access_key_id=AWS_ACCESS_KEY_ID, 
-                            aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
-                            region_name='us-east-1')
-
-    response = textract.start_document_text_detection(
-        DocumentLocation={'S3Object': {'Bucket': bucket_name, 'Name': file_path}}
-    )
-
-    print('Processing...')
+def ocr_endpoint():
+    data = request.get_json()
+    input_pdf_file = data.get('input_pdf_file', None)
+    history = data.get('history', None)
+    collection_name = data.get('collection_name', None)
     
-    while True:
-        response_get = textract.get_document_text_detection(
-            JobId=response['JobId']
-        )
-        
-        status = response_get['JobStatus']
-        print('Job status: {}'.format(status))
+    if not input_pdf_file:
+        return jsonify({"error": "input_pdf_file is required"}), 400
 
-        if status in ['SUCCEEDED', 'FAILED']:
-            print('Finished')
-            break
-            
-        print('Waiting for the job to complete...')
-        time.sleep(5)
+    history, texts, collection_name = pdf_2_text(input_pdf_file, history, collection_name)
+    
+    if collection_name == 'None':
+        return jsonify({"error": texts}), 400
 
-    text = ''
-    for result_page in response_get['Blocks']:
-        if 'Text' in result_page:
-            text += result_page['Text'] + '\n'
-
-    # Create document
-    doc = Document(page_content=text)
-    print(type(doc))
-
-    # Generate embeddings
-    embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
-    qdrant = Qdrant.from_documents([doc], embeddings, url=qdrant_url, collection_name=collection_name, prefer_grpc=True, api_key=qdrant_api_key)
-    # os.remove(file_path) # Delete downloaded file
-    return {"collection_name":qdrant.collection_name}
+    return jsonify({"collection_name": collection_name, "history": history, "texts": texts}), 200
 
 
 
