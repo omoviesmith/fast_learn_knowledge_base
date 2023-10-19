@@ -36,10 +36,18 @@ def pdf_2_text(input_pdf_file, history, collection_name):
     default_bucket_name = "myflash" 
     output_file = "output.txt"
    
-    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file))
+    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
     
+    # try:
+    #     response = s3_client.upload_file(input_pdf_file, default_bucket_name, key)
+    # except NoCredentialsError as e:
+    #     print("Error uploading file to S3:", e)
+    #     return history, "Error uploading file to S3: {}".format(e), "None"
+
     try:
-        response = s3_client.upload_file(input_pdf_file, default_bucket_name, key)
+        input_pdf_file.save(input_pdf_file.filename)
+        s3_client.upload_file(input_pdf_file.filename, default_bucket_name, key)
+        os.remove(input_pdf_file.filename)
     except NoCredentialsError as e:
         print("Error uploading file to S3:", e)
         return history, "Error uploading file to S3: {}".format(e), "None"
