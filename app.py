@@ -94,10 +94,11 @@ def ocr_route():
 
     # Create document
     doc = Document(page_content=text)
+    print(type(doc))
 
     # Generate embeddings
     embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
-    qdrant = Qdrant.from_documents(doc, embeddings, url=qdrant_url, collection_name=collection_name, prefer_grpc=True, api_key=qdrant_api_key)
+    qdrant = Qdrant.from_documents([doc], embeddings, url=qdrant_url, collection_name=collection_name, prefer_grpc=True, api_key=qdrant_api_key)
     # os.remove(file_path) # Delete downloaded file
     return {"collection_name":qdrant.collection_name}
 
