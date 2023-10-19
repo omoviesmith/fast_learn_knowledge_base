@@ -85,7 +85,7 @@ def pdf_2_text(input_pdf_file, history, collection_name):
 app = Flask(__name__)
 CORS(app)
 
-# Test default route
+# Test default route h
 @app.route('/')
 def hello_world():
     return {"Hello":"World"}
