@@ -93,10 +93,15 @@ def hello_world():
 
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
-    data = request.get_json()
-    input_pdf_file = data.get('input_pdf_file', None)
-    history = data.get('history', None)
-    collection_name = data.get('collection_name', None)
+    # data = request.get_json()
+    # input_pdf_file = data.get('input_pdf_file', None)
+    # history = data.get('history', None)
+    # collection_name = data.get('collection_name', None)
+    if 'input_pdf_file' not in request.files:
+        return jsonify({"error": "input_pdf_file is required"}), 400
+    input_pdf_file = request.files['input_pdf_file']
+    history = request.form.get('history')
+    collection_name = request.form.get('collection_name')
     
     if not input_pdf_file:
         return jsonify({"error": "input_pdf_file is required"}), 400
