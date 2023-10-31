@@ -131,3 +131,7 @@ poetry-convert.py
 
 #testing python notebook
 test.ipynb
+
+new
+pace
+pytest_cache

@@ -1,5 +1,5 @@
 # Use an official Python runtime as the parent image
-FROM python:3.8-slim-buster
+FROM python:3.10-slim-buster
 
 # Set environment variables
 # ENV PYTHONUNBUFFERED=1
@@ -29,6 +29,13 @@ COPY . .
 # Make the server listen on port 8000 at runtime
 EXPOSE 8000
 
+# Make sure Flask runs in production and listens on all interfaces
+ENV FLASK_APP=app.py
+ENV FLASK_RUN_HOST=0.0.0.0
+ENV FLASK_RUN_PORT=8080
+ENV GUNICORN_WORKERS=4
 # Define the command to start the app using gunicorn
 # CMD ["gunicorn", "--bind", ":8000", "app:app"]
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "120", "--workers", "4", "app:app"]
+# Start the server
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 app:app
+
