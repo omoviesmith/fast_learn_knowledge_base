@@ -161,6 +161,9 @@ def process_ocr(input_pdf_file, collection_name, action='create'):
                 collection_name=collection_name,
                 vectors_config=vectors_config,
             )
+            print(f'Updating an existing collection - {collection_name}...')
+            vector_store.add_documents(chunks)
+            return
         else:
             print(f"Invalid action: {action}")
             return
@@ -169,14 +172,42 @@ def process_ocr(input_pdf_file, collection_name, action='create'):
         vector_store.add_documents(chunks)
         print('Upserting finished.')
 
-        embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
-        # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, prefer_grpc=True, api_key=qdrant_api_key, force_recreate=False)
+            # Get the chat history for this collection from the session
+        chat_history = session.get(collection_name, [])
+        query = "As a multilingual document assistant, summarize the entire document, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+        
+        vector_store = Qdrant(
+            client=qdrant_client, collection_name=collection_name,
+            embeddings=cohere, vector_name=collection_name
+                )
+        custom_template = """Start the conversation with a polite greeting and let them know you are a multilingual document assistant here to help with any questions regarding the document uploaded.For example, "Hello, Nice to meet you. I'm a multilingual document assistant here to help with any questions regarding the document". Always Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming.
+             You are a multilingual document assistant here to help with any questions regarding the document uploaded.   If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+            Chat History:
+            {chat_history}
+            Follow Up Input: {question}
+            Standalone question:"""
+        custom_prompt = PromptTemplate.from_template(custom_template)
+
+        llm = ChatOpenAI(temperature=1)
+        retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
+
+        crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
+        result = crc({'question': query, 'chat_history': chat_history})
+        answer = result['answer']
+        chat_history.append((query, result['answer']))
+        # After retrieving and modifying `chat_history`
+
+        # Save the updated chat history back to the session
+        session[collection_name] = chat_history
+
+        # print(result,chat_history)
+        # return result, chat_history
+        data = {"Created a new collection ":collection_name, 'answer': answer}
+        json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
+        # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
         os.remove(output_file) # Delete downloaded file
-        # collection_name = qdrant.collection_name
-        return history, first_512_chars, collection_name
-
-    return "Failed to convert document", "None"
-
+        # return {"Created a new collection ":collection_name}
+        return Response(json_data, mimetype='application/json; charset=utf-8')
 
 #Flask config
 app = Flask(__name__)
@@ -200,12 +231,13 @@ def update_endpoint(collection_name):
         return jsonify({"error": "input_pdf_file is required"}), 400
     print(input_pdf_file.filename)
 
-    history, texts, collection_name = process_ocr(input_pdf_file, collection_name, 'update')
+    # history, texts, collection_name = process_ocr(input_pdf_file, collection_name, 'update')
+    updated = process_ocr(input_pdf_file, collection_name, 'update')
 
-    if collection_name == 'None':
-        return jsonify({"error": texts}), 400
+    # if collection_name == 'None':
+    #     return jsonify({"error": texts}), 400
 
-    return jsonify({"Updated an existing collection": collection_name, "texts": texts}), 200
+    return jsonify({"Updated an existing collection": collection_name}), 200
 
 
 @app.route('/upload_ocr', methods=['POST'])  # recreate or update
@@ -226,12 +258,15 @@ def ocr_endpoint():
     # history = []
 
     # call the function and get the collection name
-    history, texts, collection_name = process_ocr(input_pdf_file, collection_name)
+    # history, texts, collection_name = process_ocr(input_pdf_file, collection_name)
+    docresponse = process_ocr(input_pdf_file, collection_name)
 
-    if collection_name == 'None':
-        return jsonify({"error": texts}), 400
+    # if collection_name == 'None':
+    #     return jsonify({"error": texts}), 400
+    
+    return docresponse
 
-    return jsonify({"Created a new document": collection_name, "texts": texts}), 200
+    # return jsonify({"Created a new document": collection_name, "texts": texts}), 200
 
 
 
@@ -314,9 +349,43 @@ def upload_pdf():
 
     vector_store.add_documents(chunks)
     print('Upserting finished.')
+
+            # Get the chat history for this collection from the session
+    chat_history = session.get(collection_name, [])
+    query = "As a multilingual document assistant, summarize the entire document, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+        
+    vector_store = Qdrant(
+            client=qdrant_client, collection_name=collection_name,
+            embeddings=cohere, vector_name=collection_name
+                )
+    custom_template = """Start with a polite greeting and let them know you are a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming.
+             You are a multilingual document assistant here to help with any questions regarding the document uploaded.   If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+            Chat History:
+            {chat_history}
+            Follow Up Input: {question}
+            Standalone question:"""
+    custom_prompt = PromptTemplate.from_template(custom_template)
+
+    llm = ChatOpenAI(temperature=1)
+    retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
+
+    crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
+    result = crc({'question': query, 'chat_history': chat_history})
+    answer = result['answer']
+    chat_history.append((query, result['answer']))
+     # After retrieving and modifying `chat_history`
+
+    # Save the updated chat history back to the session
+    session[collection_name] = chat_history
+
+    # print(result,chat_history)
+    # return result, chat_history
+    data = {"Created a new collection ":collection_name, 'answer': answer}
+    json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
     # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
     os.remove(file_path) # Delete downloaded file
-    return {"Created a new collection ":collection_name}
+    # return {"Created a new collection ":collection_name}
+    return Response(json_data, mimetype='application/json; charset=utf-8')
 
 
 @app.route('/update_anydoc/<collection_name>', methods=['POST'])
@@ -444,7 +513,7 @@ def retrieve_info(chat_history=[]):
         client=qdrant_client, collection_name=collection_name,
         embeddings=cohere, vector_name=collection_name
             )
-    custom_template = """You are a nice assistant having a conversation with a human.Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+    custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
         Chat History:
         {chat_history}
         Follow Up Input: {question}
