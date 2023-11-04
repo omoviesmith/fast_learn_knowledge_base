@@ -499,7 +499,7 @@ AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 @app.route('/retriever', methods=['POST'])
-def retrieve_info(chat_history=[]):
+def retrieve_in(chat_history=[]):
     collection_name = request.json.get("collection_name")
     print(collection_name)
     query = request.json.get("query")
