@@ -140,7 +140,7 @@ def process_ocr(input_pdf_file, collection_name, action='create'):
 
         chunks = text_splitter.split_documents(docs)
 
-            # Generate embeddings
+        # Generate embeddings
         # embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
         # Recreate the collection with the new vector store
         vector_store = Qdrant(
@@ -212,7 +212,8 @@ def process_ocr(input_pdf_file, collection_name, action='create'):
 #Flask config
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')  # set the SECRET_KEY environment variable before running your app
-CORS(app)
+# CORS(app)
+CORS(app, resources={r"/*": {"origins": "https://askmydocument.onrender.com", "supports_credentials": True}})
 
 # Test default route h
 @app.route('/')
@@ -352,13 +353,13 @@ def upload_pdf():
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = "As a multilingual document assistant, summarize the entire document, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+    query = "Summarize the entire document, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
             embeddings=cohere, vector_name=collection_name
                 )
-    custom_template = """Start with a polite greeting and let them know you are a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming.
+    custom_template = """Start with a polite greeting and introduce yourself as a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming.
              You are a multilingual document assistant here to help with any questions regarding the document uploaded.   If you do not know the answer reply with 'I am sorry, I dont have this answer'.
             Chat History:
             {chat_history}
@@ -536,6 +537,50 @@ def retrieve_info(chat_history=[]):
     # print(result,chat_history)
     # return result, chat_history
     data = {'question': query, 'answer': answer, 'chat_history': chat_history}
+    json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
+
+    return Response(json_data, mimetype='application/json; charset=utf-8')
+
+@app.route('/summarize', methods=['POST'])
+def retrieve_info(chat_history=[]):
+    collection_name = request.json.get("collection_name")
+    print(collection_name)
+    # query = request.json.get("query")
+    query = "Summarize the entire document in a detailed manner. List out all the key points"
+
+    if not collection_name or len(collection_name) > 255:
+        return {"error": "Invalid collection name"}
+    
+    # Get the chat history for this collection from the session
+    # chat_history = session.get(collection_name, [])
+
+    vector_store = Qdrant(
+        client=qdrant_client, collection_name=collection_name,
+        embeddings=cohere, vector_name=collection_name
+            )
+    custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+        Chat History:
+        {chat_history}
+        Follow Up Input: {question}
+        Standalone question:"""
+    custom_prompt = PromptTemplate.from_template(custom_template)
+
+    llm = ChatOpenAI(temperature=1)
+    retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
+
+    crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
+    result = crc({'question': query, 'chat_history': chat_history})
+    answer = result['answer']
+    # chat_history.append((query, result['answer']))
+     # After retrieving and modifying `chat_history`
+    # chat_history.append((query, result['answer']))
+
+    # Save the updated chat history back to the session
+    # session[collection_name] = chat_history
+
+    # print(result,chat_history)
+    # return result, chat_history
+    data = {'answer': answer}
     json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
 
     return Response(json_data, mimetype='application/json; charset=utf-8')
