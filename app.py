@@ -224,7 +224,7 @@ def hello_world():
     return {"Hello":"World"}
 
 @app.route('/upload_ocr/<collection_name>', methods=['POST'])  # recreate or update
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def update_endpoint(collection_name):
     # Check if file is included in request
     if 'input_pdf_file' not in request.files:
@@ -246,7 +246,7 @@ def update_endpoint(collection_name):
 
 
 @app.route('/upload_ocr', methods=['POST'])  # recreate or update
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def ocr_endpoint():
     # Check if file is included in request
     if 'input_pdf_file' not in request.files:
@@ -283,7 +283,7 @@ from langchain.vectorstores import Qdrant
 from io import BytesIO
 
 @app.route('/upload_anydoc', methods=['POST'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def upload_pdf():
 
     if 'input_pdf_file' not in request.files:
@@ -396,7 +396,7 @@ def upload_pdf():
 
 
 @app.route('/update_anydoc/<collection_name>', methods=['POST'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def update_pdf(collection_name):
 
     if 'input_pdf_file' not in request.files:
@@ -473,7 +473,7 @@ def update_pdf(collection_name):
     return {"Updated an existing collection ":collection_name}
 
 @app.route('/list_documents', methods=['POST'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def list_documents():
     collection_data = qdrant_client.get_collections()
     document_names = [collection.name for collection in collection_data.collections]
@@ -481,7 +481,7 @@ def list_documents():
 
 
 @app.route('/delete_document', methods=['DELETE'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def delete_collection():
     collection_name = request.json.get("collection_name")
 
@@ -508,7 +508,7 @@ AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 @app.route('/retriever', methods=['POST'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def retrieve_in(chat_history=[]):
     collection_name = request.json.get("collection_name")
     print(collection_name)
@@ -552,7 +552,7 @@ def retrieve_in(chat_history=[]):
     return Response(json_data, mimetype='application/json; charset=utf-8')
 
 @app.route('/summarize', methods=['POST'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def retrieve_summary(chat_history=[]):
     collection_name = request.json.get("collection_name")
     print(collection_name)
@@ -597,7 +597,7 @@ def retrieve_summary(chat_history=[]):
     return Response(json_data, mimetype='application/json; charset=utf-8')
 
 @app.route('/chathistory/<collection_name>', methods=['GET'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def get_collection_history(collection_name):
     # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
@@ -611,7 +611,7 @@ def get_collection_history(collection_name):
     })
 
 @app.route('/clearhistory/<collection_name>', methods=['POST'])
-cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def clear_collection_history(collection_name):
     # Remove the chat history for this collection from the session
     session.pop(collection_name, None)
