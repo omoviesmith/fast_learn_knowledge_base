@@ -542,7 +542,7 @@ def retrieve_info(chat_history=[]):
     return Response(json_data, mimetype='application/json; charset=utf-8')
 
 @app.route('/summarize', methods=['POST'])
-def retrieve_info(chat_history=[]):
+def retrieve_summary(chat_history=[]):
     collection_name = request.json.get("collection_name")
     print(collection_name)
     # query = request.json.get("query")
