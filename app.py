@@ -43,11 +43,14 @@ from langchain.chat_models import ChatOpenAI
 from langchain.memory import ConversationSummaryMemory
 from langchain.chains import ConversationalRetrievalChain
 from datetime import datetime
+from langchain.document_loaders import AmazonTextractPDFLoader
+
+from langchain.prompts.prompt import PromptTemplate
 import os
 import qdrant_client
 import cohere
 import qdrant_client
-
+from urllib.parse import urlsplit, urlunsplit
 from qdrant_client.http.models import Batch
 from qdrant_client.http import models
 import os
@@ -75,137 +78,22 @@ cohere = CohereEmbeddings(
                 model="multilingual-22-12", cohere_api_key=os.getenv('cohere_api_key')
   )
 
-def process_ocr(input_pdf_file, collection_name, action='create'):
-    # AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-    # AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
-    s3_client = boto3.client('s3', 
-                      aws_access_key_id=AWS_ACCESS_KEY_ID, 
-                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
-                      region_name='us-east-1')
-    textract_client = boto3.client('textract', 
-                            aws_access_key_id=AWS_ACCESS_KEY_ID, 
-                            aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
-                            region_name='us-east-1')
-    history = []
-    default_bucket_name = "myflash" 
-    output_file = "output.txt"
-   
-    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
 
-    try:
-        input_pdf_file.save(input_pdf_file.filename)
-        s3_client.upload_file(input_pdf_file.filename, default_bucket_name, key)
-        os.remove(input_pdf_file.filename)
-    except NoCredentialsError as e:
-        print("Error uploading file to S3:", e)
-        return history, "Error uploading file to S3: {}".format(e), "None"
-        
-    s3_object = {'Bucket': default_bucket_name, 'Name': key}
-    
-    response = textract_client.start_document_analysis(
-        DocumentLocation={'S3Object': s3_object},
-        FeatureTypes=['TABLES', 'FORMS']
-    )
-    job_id = response['JobId']
-    
-    while True:
-        response = textract_client.get_document_analysis(JobId=job_id)
-        status = response['JobStatus']
-        if status in ['SUCCEEDED', 'FAILED']:
-            break
-        time.sleep(5)
+custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+    Chat History:
+    {chat_history}
+    Follow Up Input: {question}
+    Standalone question:"""
 
-    if status == 'SUCCEEDED':
-        with open(output_file, 'w') as output_file_io:
-            for block in response['Blocks']:
-                if block['BlockType'] in ['LINE', 'WORD']:
-                    output_file_io.write(block['Text'] + '\n')
+custom_prompt = PromptTemplate.from_template(custom_template)
 
-        with open(output_file, "r") as file:
-            first_512_chars = file.read(512).replace("\n", "").replace("\r", "").replace("[", "").replace("]", "") + " [...]"
-            history.append(("Document conversion", first_512_chars))
+llm = ChatOpenAI(temperature=1)
 
-        loader = TextLoader(output_file)
-        docs = loader.load()
-        text_splitter = RecursiveCharacterTextSplitter(
-        # Set a really small chunk size, just to show.
-        chunk_size = 500,
-        chunk_overlap  = 20,
-        length_function = len,
-        is_separator_regex = False,
-            )
+# retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
 
-        chunks = text_splitter.split_documents(docs)
+# crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
 
-        # Generate embeddings
-        # embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
-        # Recreate the collection with the new vector store
-        vector_store = Qdrant(
-        client=qdrant_client, collection_name=collection_name,
-        embeddings=cohere, vector_name=collection_name
-            )
-        vectors_config = {
-            collection_name: models.VectorParams(size=768, #collection_name as custom vector name
-        distance=models.Distance.COSINE),
-        }
-        if action == 'create':
-            qdrant_client.recreate_collection(
-                collection_name=collection_name,
-                vectors_config=vectors_config,
-            )
-        elif action == 'update':
-            qdrant_client.update_collection(
-                collection_name=collection_name,
-                vectors_config=vectors_config,
-            )
-            print(f'Updating an existing collection - {collection_name}...')
-            vector_store.add_documents(chunks)
-            return
-        else:
-            print(f"Invalid action: {action}")
-            return
-        print('Loading a new vector store...')
-
-        vector_store.add_documents(chunks)
-        print('Upserting finished.')
-
-            # Get the chat history for this collection from the session
-        chat_history = session.get(collection_name, [])
-        query = "As a multilingual document assistant, summarize the entire document, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
-        
-        vector_store = Qdrant(
-            client=qdrant_client, collection_name=collection_name,
-            embeddings=cohere, vector_name=collection_name
-                )
-        custom_template = """Start the conversation with a polite greeting and let them know you are a multilingual document assistant here to help with any questions regarding the document uploaded.For example, "Hello, Nice to meet you. I'm a multilingual document assistant here to help with any questions regarding the document". Always Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming.
-             You are a multilingual document assistant here to help with any questions regarding the document uploaded.   If you do not know the answer reply with 'I am sorry, I dont have this answer'.
-            Chat History:
-            {chat_history}
-            Follow Up Input: {question}
-            Standalone question:"""
-        custom_prompt = PromptTemplate.from_template(custom_template)
-
-        llm = ChatOpenAI(temperature=1)
-        retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
-
-        crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
-        result = crc({'question': query, 'chat_history': chat_history})
-        answer = result['answer']
-        chat_history.append((query, result['answer']))
-        # After retrieving and modifying `chat_history`
-
-        # Save the updated chat history back to the session
-        session[collection_name] = chat_history
-
-        # print(result,chat_history)
-        # return result, chat_history
-        data = {"Created a new collection ":collection_name, 'answer': answer}
-        json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
-        # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
-        os.remove(output_file) # Delete downloaded file
-        # return {"Created a new collection ":collection_name}
-        return Response(json_data, mimetype='application/json; charset=utf-8')
 
 #Flask config
 app = Flask(__name__)
@@ -234,13 +122,71 @@ def update_endpoint(collection_name):
         return jsonify({"error": "input_pdf_file is required"}), 400
     print(input_pdf_file.filename)
 
-    # history, texts, collection_name = process_ocr(input_pdf_file, collection_name, 'update')
-    updated = process_ocr(input_pdf_file, collection_name, 'update')
+# Prepare S3 client
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id = AWS_ACCESS_KEY_ID,
+        aws_secret_access_key = AWS_SECRET_ACCESS_KEY,
+        region_name = 'us-east-1',
+    )
 
-    # if collection_name == 'None':
-    #     return jsonify({"error": texts}), 400
+    textract_client = boto3.client('textract', 
+                            aws_access_key_id=AWS_ACCESS_KEY_ID, 
+                            aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
+                            region_name='us-east-1')
 
-    return jsonify({"Updated an existing collection": collection_name}), 200
+    default_bucket_name = "myflash" 
+    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
+    
+    try:
+        # Upload the file to S3 and get the response
+        response = s3_client.upload_fileobj(input_pdf_file, default_bucket_name, key)
+        s3_url = f"s3://{default_bucket_name}/{key}"
+
+        print(s3_url)
+    except NoCredentialsError as e:
+        print("Error uploading file to S3:", e)
+        return jsonify({"error": "Error uploading file to S3", "details": str(e)}), 500
+
+    # Then, use s3_url with AmazonTextractPDFLoader
+    loader = AmazonTextractPDFLoader(s3_url, client=textract_client)
+    docs = loader.load()
+    print(len(docs))
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        # Set a really small chunk size, just to show.
+        chunk_size = 500,
+        chunk_overlap  = 20,
+        length_function = len,
+        is_separator_regex = False,
+    )
+
+    chunks = text_splitter.split_documents(docs)
+    # Generate embeddings
+    embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
+    # Recreate the collection with the new vector store
+    vector_store = Qdrant(
+        client=qdrant_client, collection_name=collection_name,
+        embeddings=cohere, vector_name=collection_name
+            )
+    vectors_config = {
+          collection_name: models.VectorParams(size=768, #collection_name as custom vector name
+      distance=models.Distance.COSINE),
+      }
+    
+    qdrant_client.update_collection(
+                collection_name=collection_name,
+                vectors_config=vectors_config,
+    )
+    
+    print('Loading a new vector store...')
+    # texts = [chunk.page_content for chunk in chunks]
+
+    vector_store.add_documents(chunks)
+    print('Upserting finished.')
+
+    # print(result,chat_history)
+    return {"Updated an existing collection ":collection_name}
 
 
 @app.route('/upload_ocr', methods=['POST'])  # recreate or update
@@ -258,19 +204,104 @@ def ocr_endpoint():
     # Extract the collection name from the file name
     collection_name = os.path.splitext(os.path.basename(input_pdf_file.filename))[0].replace(" ", "_")
 
-    # history = request.form.get('history') 
-    # history = []
+    # Prepare S3 client
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id = AWS_ACCESS_KEY_ID,
+        aws_secret_access_key = AWS_SECRET_ACCESS_KEY,
+        region_name = 'us-east-1',
+    )
 
-    # call the function and get the collection name
-    # history, texts, collection_name = process_ocr(input_pdf_file, collection_name)
-    docresponse = process_ocr(input_pdf_file, collection_name)
+    textract_client = boto3.client('textract', 
+                            aws_access_key_id=AWS_ACCESS_KEY_ID, 
+                            aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
+                            region_name='us-east-1')
 
-    # if collection_name == 'None':
-    #     return jsonify({"error": texts}), 400
+    default_bucket_name = "myflash" 
+    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
     
-    return docresponse
+    try:
+        # Upload the file to S3 and get the response
+        response = s3_client.upload_fileobj(input_pdf_file, default_bucket_name, key)
+        s3_url = f"s3://{default_bucket_name}/{key}"
 
-    # return jsonify({"Created a new document": collection_name, "texts": texts}), 200
+        print(s3_url)
+    except NoCredentialsError as e:
+        print("Error uploading file to S3:", e)
+        return jsonify({"error": "Error uploading file to S3", "details": str(e)}), 500
+
+    # Then, use s3_url with AmazonTextractPDFLoader
+    loader = AmazonTextractPDFLoader(s3_url, client=textract_client)
+    docs = loader.load()
+    print(len(docs))
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        # Set a really small chunk size, just to show.
+        chunk_size = 500,
+        chunk_overlap  = 20,
+        length_function = len,
+        is_separator_regex = False,
+    )
+
+    chunks = text_splitter.split_documents(docs)
+    # Generate embeddings
+    embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
+    # Recreate the collection with the new vector store
+    vector_store = Qdrant(
+        client=qdrant_client, collection_name=collection_name,
+        embeddings=cohere, vector_name=collection_name
+            )
+    vectors_config = {
+          collection_name: models.VectorParams(size=768, #collection_name as custom vector name
+      distance=models.Distance.COSINE),
+      }
+    
+    qdrant_client.recreate_collection(
+                collection_name=collection_name,
+                vectors_config=vectors_config,
+    )
+    
+    print('Loading a new vector store...')
+    # texts = [chunk.page_content for chunk in chunks]
+
+    vector_store.add_documents(chunks)
+    print('Upserting finished.')
+
+            # Get the chat history for this collection from the session
+    chat_history = session.get(collection_name, [])
+    query = "What is this document all about, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+        
+    vector_store = Qdrant(
+            client=qdrant_client, collection_name=collection_name,
+            embeddings=cohere, vector_name=collection_name
+                )
+    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. 
+               If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+            Chat History:
+            {chat_history}
+            Follow Up Input: {question}
+            Standalone question:"""
+    custom_prompt = PromptTemplate.from_template(custom_template)
+
+    llm = ChatOpenAI(temperature=1)
+    retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
+
+    crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
+    result = crc({'question': query, 'chat_history': chat_history})
+    answer = result['answer']
+    chat_history.append((query, result['answer']))
+     # After retrieving and modifying `chat_history`
+
+    # Save the updated chat history back to the session
+    session[collection_name] = chat_history
+
+    # print(result,chat_history)
+    # return result, chat_history
+    data = {"Created a new collection ":collection_name, 'answer': answer}
+    json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
+    # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
+
+    return Response(json_data, mimetype='application/json; charset=utf-8')
 
 
 
@@ -283,42 +314,65 @@ from io import BytesIO
 @app.route('/upload_anydoc', methods=['POST'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def upload_pdf():
-
     if 'input_pdf_file' not in request.files:
         return jsonify({"error": "input_pdf_file is required"}), 400
+    
     input_pdf_file = request.files['input_pdf_file']
 
     # Check if we have a file in the request
     if not input_pdf_file:
         return jsonify({"error": "input_pdf_file is required"}), 400
 
-        # Extract the collection name from the file name
+    # Extract the collection name from the file name
     collection_name = os.path.splitext(os.path.basename(input_pdf_file.filename))[0].replace(" ", "_")
-    print(collection_name)
-    # write the uploaded file to a local file
+    
+    # Prepare S3 client
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id = AWS_ACCESS_KEY_ID,
+        aws_secret_access_key = AWS_SECRET_ACCESS_KEY,
+        region_name = 'us-east-1',
+    )
 
-    if not collection_name:
-        #  Assign a default name
-        current_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        collection_name = "document" + current_time
-    print(collection_name)
-    file_path = os.path.join('./', input_pdf_file.filename)
+    default_bucket_name = "myflash" 
+    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
+    
+    try:
+        # Save the file temporarily and upload it to S3
+        # input_pdf_file.save(input_pdf_file.filename)
+        # s3_client.upload_file(input_pdf_file.filename, default_bucket_name, key)
+        s3_client.upload_fileobj(input_pdf_file, default_bucket_name, key)
+        
+        # Get the URL of the uploaded file
+        generated_url = s3_client.generate_presigned_url('get_object', Params={
+            'Bucket': default_bucket_name, 
+            'Key': key
+        })
 
-    # write the uploaded file to a local file
-    file_path = os.path.join('./', input_pdf_file.filename)
-    input_pdf_file.save(file_path)
-    print(file_path)
+        # os.remove(input_pdf_file.filename)
 
-    # Checking filetype for document parsing, PyPDF is a lot faster than Unstructured for pdfs.
+        # Parse the URL and rebuild it without params
+        url_parts = list(urlsplit(generated_url))
+        url_parts[3] = ""  # Parameters are at index 3
+        file_url = urlunsplit(url_parts)
+
+        print(file_url)
+        
+    except NoCredentialsError as e:
+        print("Error uploading file to S3:", e)
+        return jsonify({"error": "Error uploading file to S3", "details": str(e)}), 500
+
+    # Checking filetype for document parsing. PyPDF is a lot faster than Unstructured for pdfs.
     import mimetypes
-    mime_type = mimetypes.guess_type(input_pdf_file.filename)[0]
+    mime_type = mimetypes.guess_type(file_url)[0]
     print(mime_type)
-    # now you have a local file to process using the loaders
+    # Load the file from the Byte Stream
+    # byte_stream.seek(0)  # Make sure to seek to the start of the file
     if mime_type == 'application/pdf':
-        loader = PyPDFLoader(file_path)
+        loader = PyPDFLoader(file_url, extract_images=True)
         docs = loader.load()
     else:
-        loader = UnstructuredFileLoader(file_path)
+        loader = UnstructuredFileLoader(file_url)
         docs = loader.load()
 
     text_splitter = RecursiveCharacterTextSplitter(
@@ -346,10 +400,8 @@ def upload_pdf():
                 collection_name=collection_name,
                 vectors_config=vectors_config,
     )
-
     
     print('Loading a new vector store...')
-
     # texts = [chunk.page_content for chunk in chunks]
 
     vector_store.add_documents(chunks)
@@ -357,14 +409,14 @@ def upload_pdf():
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = "Summarize the entire document, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+    query = "What is this document all about, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
             embeddings=cohere, vector_name=collection_name
                 )
-    custom_template = """Start with a polite greeting and introduce yourself as a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. Your greeting should be welcoming.
-             You are a multilingual document assistant here to help with any questions regarding the document uploaded.   If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. 
+               If you do not know the answer reply with 'I am sorry, I dont have this answer'.
             Chat History:
             {chat_history}
             Follow Up Input: {question}
@@ -388,7 +440,7 @@ def upload_pdf():
     data = {"Created a new collection ":collection_name, 'answer': answer}
     json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
     # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
-    os.remove(file_path) # Delete downloaded file
+    # os.remove(file_path) # Delete downloaded file
     # return {"Created a new collection ":collection_name}
     return Response(json_data, mimetype='application/json; charset=utf-8')
 
@@ -405,33 +457,53 @@ def update_pdf(collection_name):
     if not input_pdf_file:
         return jsonify({"error": "input_pdf_file is required"}), 400
 
-        # Extract the collection name from the file name
-    # collection_name = os.path.splitext(os.path.basename(input_pdf_file.filename))[0].replace(" ", "_")
-    print(collection_name)
-    # write the uploaded file to a local file
+# Prepare S3 client
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id = AWS_ACCESS_KEY_ID,
+        aws_secret_access_key = AWS_SECRET_ACCESS_KEY,
+        region_name = 'us-east-1',
+    )
 
-    if not collection_name:
-        #  Assign a default name
-        current_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        collection_name = "document" + current_time
-    print(collection_name)
-    file_path = os.path.join('./', input_pdf_file.filename)
+    default_bucket_name = "myflash" 
+    key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
+    
+    try:
+        # Save the file temporarily and upload it to S3
+        # input_pdf_file.save(input_pdf_file.filename)
+        # s3_client.upload_file(input_pdf_file.filename, default_bucket_name, key)
+        s3_client.upload_fileobj(input_pdf_file, default_bucket_name, key)
+        
+        # Get the URL of the uploaded file
+        generated_url = s3_client.generate_presigned_url('get_object', Params={
+            'Bucket': default_bucket_name, 
+            'Key': key
+        })
 
-    # write the uploaded file to a local file
-    file_path = os.path.join('./', input_pdf_file.filename)
-    input_pdf_file.save(file_path)
-    print(file_path)
+        # os.remove(input_pdf_file.filename)
 
-    # Checking filetype for document parsing, PyPDF is a lot faster than Unstructured for pdfs.
+        # Parse the URL and rebuild it without params
+        url_parts = list(urlsplit(generated_url))
+        url_parts[3] = ""  # Parameters are at index 3
+        file_url = urlunsplit(url_parts)
+
+        print(file_url)
+        
+    except NoCredentialsError as e:
+        print("Error uploading file to S3:", e)
+        return jsonify({"error": "Error uploading file to S3", "details": str(e)}), 500
+
+    # Checking filetype for document parsing. PyPDF is a lot faster than Unstructured for pdfs.
     import mimetypes
-    mime_type = mimetypes.guess_type(input_pdf_file.filename)[0]
+    mime_type = mimetypes.guess_type(file_url)[0]
     print(mime_type)
-    # now you have a local file to process using the loaders
+    # Load the file from the Byte Stream
+    # byte_stream.seek(0)  # Make sure to seek to the start of the file
     if mime_type == 'application/pdf':
-        loader = PyPDFLoader(file_path)
+        loader = PyPDFLoader(file_url, extract_images=True)
         docs = loader.load()
     else:
-        loader = UnstructuredFileLoader(file_path)
+        loader = UnstructuredFileLoader(file_url)
         docs = loader.load()
 
     text_splitter = RecursiveCharacterTextSplitter(
@@ -455,19 +527,16 @@ def update_pdf(collection_name):
       distance=models.Distance.COSINE),
       }
     
-    qdrant_client.update_collection(
+    qdrant_client.recreate_collection(
                 collection_name=collection_name,
                 vectors_config=vectors_config,
     )
-
+    
     print('Loading a new vector store...')
-
     # texts = [chunk.page_content for chunk in chunks]
 
     vector_store.add_documents(chunks)
     print('Upserting finished.')
-    # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
-    os.remove(file_path) # Delete downloaded file
     return {"Updated an existing collection ":collection_name}
 
 @app.route('/list_documents', methods=['POST'])
@@ -509,7 +578,7 @@ AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def retrieve_in(chat_history=[]):
     collection_name = request.json.get("collection_name")
-    print(collection_name)
+    # print(collection_name)
     query = request.json.get("query")
 
     if not collection_name or len(collection_name) > 255:
@@ -520,17 +589,22 @@ def retrieve_in(chat_history=[]):
     print(chat_history)
 
     vector_store = Qdrant(
-        client=qdrant_client, collection_name=collection_name,
-        embeddings=cohere, vector_name=collection_name
-            )
-    custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
-        Chat History:
-        {chat_history}
-        Follow Up Input: {question}
-        Standalone question:"""
+    client=qdrant_client, collection_name=collection_name,
+    embeddings=cohere, vector_name=collection_name
+    )
+
+    # vector_store = Qdrant(
+    #     client=qdrant_client, collection_name=collection_name,
+    #     embeddings=cohere, vector_name=collection_name
+    #         )
+    # custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+    #     Chat History:
+    #     {chat_history}
+    #     Follow Up Input: {question}
+    #     Standalone question:"""
     custom_prompt = PromptTemplate.from_template(custom_template)
 
-    llm = ChatOpenAI(temperature=1)
+    # llm = ChatOpenAI(temperature=1)
     retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
 
     crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
@@ -548,9 +622,11 @@ def retrieve_in(chat_history=[]):
     # return result, chat_history
     data = {'question': query, 'answer': answer, 'chat_history': chat_history}
     # print(data)
-    json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
+    # json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
 
-    return Response(json_data, mimetype='application/json; charset=utf-8')
+    # return Response(json_data, mimetype='application/json; charset=utf-8')
+    # print(data)
+    return jsonify(data)   # Use Flask's jsonify method
 
 @app.route('/summarize', methods=['POST'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
@@ -577,25 +653,17 @@ def retrieve_summary(chat_history=[]):
         Standalone question:"""
     custom_prompt = PromptTemplate.from_template(custom_template)
 
-    llm = ChatOpenAI(temperature=1)
     retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
 
     crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
     result = crc({'question': query, 'chat_history': chat_history})
     answer = result['answer']
-    # chat_history.append((query, result['answer']))
-     # After retrieving and modifying `chat_history`
-    # chat_history.append((query, result['answer']))
 
-    # Save the updated chat history back to the session
-    # session[collection_name] = chat_history
-
-    # print(result,chat_history)
     # return result, chat_history
     data = {'answer': answer}
-    json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
 
-    return Response(json_data, mimetype='application/json; charset=utf-8')
+    return jsonify(data)
+
 
 @app.route('/chathistory/<collection_name>', methods=['GET'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
