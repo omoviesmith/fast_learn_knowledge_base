@@ -70,8 +70,6 @@ qdrant_client = qdrant_client.QdrantClient(
     api_key=os.getenv('qdrant_api_key')
 )
 
-
-
 #https://github.com/langchain-ai/langchain/blob/master/libs/langchain/langchain/embeddings/cohere.py
 cohere = CohereEmbeddings(
                 model="multilingual-22-12", cohere_api_key=os.getenv('cohere_api_key')
@@ -211,12 +209,12 @@ def process_ocr(input_pdf_file, collection_name, action='create'):
 
 #Flask config
 app = Flask(__name__)
-#app.config['SECRET_KEY'] = "EKdeunvo.1"  # change this to a secure random string
-app.config['SESSION_COOKIE_SECURE'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+# app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')  # change this to a secure random string
+# app.config['SESSION_COOKIE_SECURE'] = True
+# app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 app.secret_key = os.getenv('SECRET_KEY')  # set the SECRET_KEY environment variable before running your app
-# CORS(app)
-CORS(app, resources={r"/*": {"origins": "https://askmydocument.onrender.com", "supports_credentials": True}})
+CORS(app)
+# CORS(app, resources={r"/*": {"origins": "https://askmydocument.onrender.com", "supports_credentials": True}})
 
 # Test default route h
 @app.route('/')
@@ -516,9 +514,10 @@ def retrieve_in(chat_history=[]):
 
     if not collection_name or len(collection_name) > 255:
         return {"error": "Invalid collection name"}
-    
+
     # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
+    print(chat_history)
 
     vector_store = Qdrant(
         client=qdrant_client, collection_name=collection_name,
@@ -537,6 +536,7 @@ def retrieve_in(chat_history=[]):
     crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
     result = crc({'question': query, 'chat_history': chat_history})
     answer = result['answer']
+    print(answer)
     chat_history.append((query, result['answer']))
      # After retrieving and modifying `chat_history`
     # chat_history.append((query, result['answer']))
@@ -547,6 +547,7 @@ def retrieve_in(chat_history=[]):
     # print(result,chat_history)
     # return result, chat_history
     data = {'question': query, 'answer': answer, 'chat_history': chat_history}
+    # print(data)
     json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
 
     return Response(json_data, mimetype='application/json; charset=utf-8')
