@@ -369,7 +369,7 @@ def upload_pdf():
     # Load the file from the Byte Stream
     # byte_stream.seek(0)  # Make sure to seek to the start of the file
     if mime_type == 'application/pdf':
-        loader = PyPDFLoader(file_url, extract_images=True)
+        loader = PyPDFLoader(file_url)
         docs = loader.load()
     else:
         loader = UnstructuredFileLoader(file_url)
