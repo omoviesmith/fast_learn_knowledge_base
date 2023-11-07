@@ -540,7 +540,7 @@ def update_pdf(collection_name):
     print('Upserting finished.')
     return {"Updated an existing collection ":collection_name}
 
-@app.route('/list_documents', methods=['POST'])
+@app.route('/list_documents', methods=['GET'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def list_documents():
     collection_data = qdrant_client.get_collections()
