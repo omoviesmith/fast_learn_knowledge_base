@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, Response, session, make_response
+from flask.sessions import SecureCookieSessionInterface
 from flask_cors import CORS, cross_origin
 import time
 import boto3
@@ -97,9 +98,9 @@ llm = ChatOpenAI(temperature=1)
 
 #Flask config
 app = Flask(__name__)
-# app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')  # change this to a secure random string
-# app.config['SESSION_COOKIE_SECURE'] = True
-# app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')  # change this to a secure random string
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 app.secret_key = os.getenv('SECRET_KEY')  # set the SECRET_KEY environment variable before running your app
 CORS(app)
 # CORS(app, resources={r"/*": {"origins": "https://askmydocument.onrender.com", "supports_credentials": True}})
