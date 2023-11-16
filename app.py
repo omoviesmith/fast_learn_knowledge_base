@@ -410,18 +410,18 @@ def upload_pdf():
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = "What is this document all about, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+    query = " De quoi parle ce document, puis énumérez 3 questions possibles que quelqu'un pourrait vous poser à propos du document. Encouragez ensuite la personne à poser la question. "
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
             embeddings=cohere, vector_name=collection_name
                 )
-    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. 
-               If you do not know the answer reply with 'I am sorry, I dont have this answer'.
-            Chat History:
+    custom_template = """Commencez par un message d'accueil poli et mentionnez que vous êtes un assistant documentaire multilingue pour répondre à toutes vos questions concernant le document téléchargé. Soyez poli et respectueux tout en gardant le ton de la conversation professionnel.
+                Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse'.
+            Historique des discussions:
             {chat_history}
-            Follow Up Input: {question}
-            Standalone question:"""
+            Entrée de suivi: {question}
+           Question autonome :"""
     custom_prompt = PromptTemplate.from_template(custom_template)
 
     llm = ChatOpenAI(temperature=1)
