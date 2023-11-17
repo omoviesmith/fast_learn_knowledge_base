@@ -81,11 +81,11 @@ cohere = CohereEmbeddings(
 
 
 
-custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
-    Chat History:
-    {chat_history}
-    Follow Up Input: {question}
-    Standalone question:"""
+custom_template = """Vous êtes un assistant documentaire multilingue pour aider un humain à répondre à toutes ses questions concernant ce document. Compte tenu de la conversation suivante et d'une question de suivi, reformulez la question de suivi pour en faire une question autonome. Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse ».'
+Historique des discussions:
+     {chat_history}
+     Entrée de suivi : {question}
+     Question autonome : """
 
 custom_prompt = PromptTemplate.from_template(custom_template)
 
@@ -270,14 +270,14 @@ def ocr_endpoint():
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = "What is this document all about, then list 3 possible questions someone can ask you about the document. Then encourage the person to ask. "
+    query = "De quoi parle ce document, puis énumérez 3 questions possibles que quelqu'un pourrait vous poser à propos du document. Encouragez ensuite la personne à poser la question. "
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
             embeddings=cohere, vector_name=collection_name
                 )
-    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant here to help with any questions regarding the document uploaded.. Be polite and respectful while keeping the tone of the conversation professional. 
-               If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+    custom_template = """Commencez par un message d'accueil poli et mentionnez que vous êtes un assistant documentaire multilingue pour répondre à toutes vos questions concernant le document téléchargé. Soyez poli et respectueux tout en gardant le ton de la conversation professionnel.
+                Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse.
             Chat History:
             {chat_history}
             Follow Up Input: {question}
@@ -647,7 +647,7 @@ def retrieve_summary(chat_history=[]):
         client=qdrant_client, collection_name=collection_name,
         embeddings=cohere, vector_name=collection_name
             )
-    custom_template = """You are a multilingual document assistant here to help a human with any questions he/she may have regarding the document uploaded having. Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. If you do not know the answer reply with 'I am sorry, I dont have this answer'.
+    custom_template = """Vous êtes ici un assistant de document multilingue pour aider un humain à répondre à toutes ses questions concernant le document téléchargé. Compte tenu de la conversation suivante et d'une question de suivi, reformulez la question de suivi pour en faire une question autonome. Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse '.
         Chat History:
         {chat_history}
         Follow Up Input: {question}
