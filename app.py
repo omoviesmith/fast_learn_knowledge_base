@@ -45,7 +45,7 @@ from langchain.memory import ConversationSummaryMemory
 from langchain.chains import ConversationalRetrievalChain
 from datetime import datetime
 from langchain.document_loaders import AmazonTextractPDFLoader
-
+from urllib.parse import urlparse
 from langchain.prompts.prompt import PromptTemplate
 import os
 import qdrant_client
@@ -634,8 +634,11 @@ def retrieve_in(chat_history=[]):
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def update_url(collection_name):
     # Check if file is included in request
-    collection_name = request.json.get("url")
+    collection_name = collection_name
     print(collection_name)
+
+    url = request.json.get("url")
+    
 
     
     if not collection_name or len(collection_name) > 255:
@@ -649,7 +652,7 @@ def update_url(collection_name):
         run_input={
             "startUrls": [
                 {
-                    "url": collection_name
+                    "url": url
                 }
             ]
             },
@@ -700,10 +703,12 @@ def update_url(collection_name):
 @app.route('/enter_url', methods=['POST'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def website_query(chat_history=[]):
-    collection_name = request.json.get("url")
+    url = request.json.get("url")
+    parsed_url = urlparse(url)
+    # Extract the domain name as the collection name
+    collection_name = parsed_url.netloc
     print(collection_name)
 
-    
     if not collection_name or len(collection_name) > 255:
         return {"error": "Invalid collection name"}
     # query = request.json.get("query")
@@ -715,7 +720,7 @@ def website_query(chat_history=[]):
         run_input={
             "startUrls": [
                 {
-                    "url": collection_name
+                    "url": url
                 }
             ]
             },
@@ -761,7 +766,7 @@ def website_query(chat_history=[]):
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = "De quoi parle ce document, puis énumérez 3 questions possibles que quelqu'un pourrait vous poser à propos du document. Encouragez ensuite la personne à poser la question. "
+    query = "What this document is about, then list 3 possible questions someone might ask you about the document. Then encourage the person to ask the question. "
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
