@@ -67,6 +67,14 @@ qdrant_url = os.getenv('qdrant_url')
 qdrant_api_key = os.getenv('qdrant_api_key')
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
+
+# openai_api_key = os.getenv('openai_api_key')
+# cohere_api_key = os.getenv('cohere_api_key')
+# qdrant_url = os.getenv('qdrant_url')
+# qdrant_api_key = os.getenv('qdrant_api_key')
+# AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+# AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 qdrant_client = qdrant_client.QdrantClient(
     url=os.getenv('qdrant_url'),
@@ -81,11 +89,10 @@ cohere = CohereEmbeddings(
 
 
 
-custom_template = """Vous êtes un assistant documentaire multilingue pour aider un humain à répondre à toutes ses questions concernant ce document. Compte tenu de la conversation suivante et d'une question de suivi, reformulez la question de suivi pour en faire une question autonome. Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse ».'
-Historique des discussions:
-     {chat_history}
-     Entrée de suivi : {question}
-     Question autonome : """
+custom_template = """You are a multilingual document assistant to help a human answer all their questions regarding this document. Given the following conversation and a follow-up question, rephrase the follow-up question to make it a stand-alone question. If you don't know the answer, respond with 'I'm sorry, I don't have that answer.'
+    Chat history:{chat_history}
+     Follow Up Input: {question}
+     Standalone Question : """
 
 custom_prompt = PromptTemplate.from_template(custom_template)
 
@@ -270,14 +277,14 @@ def ocr_endpoint():
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = "De quoi parle ce document, puis énumérez 3 questions possibles que quelqu'un pourrait vous poser à propos du document. Encouragez ensuite la personne à poser la question. "
+    query = "What this document is about, then list 3 possible questions someone might ask you about the document. Then encourage the person to ask the question. "
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
             embeddings=cohere, vector_name=collection_name
                 )
-    custom_template = """Commencez par un message d'accueil poli et mentionnez que vous êtes un assistant documentaire multilingue pour répondre à toutes vos questions concernant le document téléchargé. Soyez poli et respectueux tout en gardant le ton de la conversation professionnel.
-                Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse.
+    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant to answer any questions you may have regarding the uploaded document. Be polite and respectful while maintaining a professional tone of conversation.
+                 If you don’t know the answer, respond with “I’m sorry, I don’t have that answer.
             Chat History:
             {chat_history}
             Follow Up Input: {question}
@@ -410,18 +417,17 @@ def upload_pdf():
 
             # Get the chat history for this collection from the session
     chat_history = session.get(collection_name, [])
-    query = " De quoi parle ce document, puis énumérez 3 questions possibles que quelqu'un pourrait vous poser à propos du document. Encouragez ensuite la personne à poser la question. "
+    query = " What this document is about, then list 3 possible questions someone might ask you about the document. Then encourage the person to ask the question."
         
     vector_store = Qdrant(
             client=qdrant_client, collection_name=collection_name,
             embeddings=cohere, vector_name=collection_name
                 )
-    custom_template = """Commencez par un message d'accueil poli et mentionnez que vous êtes un assistant documentaire multilingue pour répondre à toutes vos questions concernant le document téléchargé. Soyez poli et respectueux tout en gardant le ton de la conversation professionnel.
-                Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse'.
-            Historique des discussions:
-            {chat_history}
-            Entrée de suivi: {question}
-           Question autonome :"""
+    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant to answer any questions you may have regarding the uploaded document. Be polite and respectful while maintaining a professional tone of conversation.
+                 If you don't know the answer, respond with 'I'm sorry, I don't have that answer'.
+             Chat history:{chat_history}
+            Follow Up Input: {question}
+           Standalone Question :"""
     custom_prompt = PromptTemplate.from_template(custom_template)
 
     llm = ChatOpenAI(temperature=1)
@@ -568,12 +574,7 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts.prompt import PromptTemplate
 
-openai_api_key = os.getenv('openai_api_key')
-cohere_api_key = os.getenv('cohere_api_key')
-qdrant_url = os.getenv('qdrant_url')
-qdrant_api_key = os.getenv('qdrant_api_key')
-AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+
 
 @app.route('/retriever', methods=['POST'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
@@ -629,6 +630,171 @@ def retrieve_in(chat_history=[]):
     # print(data)
     return jsonify(data)   # Use Flask's jsonify method
 
+@app.route('/enter_url/<collection_name>', methods=['POST'])  # recreate or update
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+def update_url(collection_name):
+    # Check if file is included in request
+    collection_name = request.json.get("url")
+    print(collection_name)
+
+    
+    if not collection_name or len(collection_name) > 255:
+        return {"error": "Invalid collection name"}
+    # query = request.json.get("query")
+    apify = ApifyWrapper()
+
+    # Call the Actor to obtain text from the crawled webpages
+    loader = apify.call_actor(
+        actor_id="apify/website-content-crawler",
+        run_input={
+            "startUrls": [
+                {
+                    "url": collection_name
+                }
+            ]
+            },
+        dataset_mapping_function=lambda item: Document(
+            page_content=item["text"] or "", metadata={"source": item["url"]}
+        ),
+    )
+    docs = loader.load()
+    # docs = loader.load()
+    print(len(docs))
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        # Set a really small chunk size, just to show.
+        chunk_size = 500,
+        chunk_overlap  = 20,
+        length_function = len,
+        is_separator_regex = False,
+    )
+
+    chunks = text_splitter.split_documents(docs)
+    # Generate embeddings
+    embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
+    # Recreate the collection with the new vector store
+    vector_store = Qdrant(
+        client=qdrant_client, collection_name=collection_name,
+        embeddings=cohere, vector_name=collection_name
+            )
+    vectors_config = {
+          collection_name: models.VectorParams(size=768, #collection_name as custom vector name
+      distance=models.Distance.COSINE),
+      }
+    
+    qdrant_client.update_collection(
+                collection_name=collection_name,
+                vectors_config=vectors_config,
+    )
+    
+    print('Loading a new vector store...')
+    # texts = [chunk.page_content for chunk in chunks]
+
+    vector_store.add_documents(chunks)
+    print('Upserting finished.')
+
+    # print(result,chat_history)
+    return {"Updated an existing collection ":collection_name}
+
+
+@app.route('/enter_url', methods=['POST'])
+@cross_origin(supports_credentials=True)  # Apply CORS to this specific route
+def website_query(chat_history=[]):
+    collection_name = request.json.get("url")
+    print(collection_name)
+
+    
+    if not collection_name or len(collection_name) > 255:
+        return {"error": "Invalid collection name"}
+    # query = request.json.get("query")
+    apify = ApifyWrapper()
+
+    # Call the Actor to obtain text from the crawled webpages
+    loader = apify.call_actor(
+        actor_id="apify/website-content-crawler",
+        run_input={
+            "startUrls": [
+                {
+                    "url": collection_name
+                }
+            ]
+            },
+        dataset_mapping_function=lambda item: Document(
+            page_content=item["text"] or "", metadata={"source": item["url"]}
+        ),
+    )
+    docs = loader.load()
+    # docs = loader.load()
+    print(len(docs))
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        # Set a really small chunk size, just to show.
+        chunk_size = 500,
+        chunk_overlap  = 20,
+        length_function = len,
+        is_separator_regex = False,
+    )
+
+    chunks = text_splitter.split_documents(docs)
+    # Generate embeddings
+    embeddings = CohereEmbeddings(model="multilingual-22-12", cohere_api_key=cohere_api_key)
+    # Recreate the collection with the new vector store
+    vector_store = Qdrant(
+        client=qdrant_client, collection_name=collection_name,
+        embeddings=cohere, vector_name=collection_name
+            )
+    vectors_config = {
+          collection_name: models.VectorParams(size=768, #collection_name as custom vector name
+      distance=models.Distance.COSINE),
+      }
+    
+    qdrant_client.recreate_collection(
+                collection_name=collection_name,
+                vectors_config=vectors_config,
+    )
+    
+    print('Loading a new vector store...')
+    # texts = [chunk.page_content for chunk in chunks]
+
+    vector_store.add_documents(chunks)
+    print('Upserting finished.')
+
+            # Get the chat history for this collection from the session
+    chat_history = session.get(collection_name, [])
+    query = "De quoi parle ce document, puis énumérez 3 questions possibles que quelqu'un pourrait vous poser à propos du document. Encouragez ensuite la personne à poser la question. "
+        
+    vector_store = Qdrant(
+            client=qdrant_client, collection_name=collection_name,
+            embeddings=cohere, vector_name=collection_name
+                )
+    custom_template = """Start with a polite greeting and mention that you are a multilingual document assistant to answer any questions you may have regarding the uploaded document. Be polite and respectful while maintaining a professional tone of conversation.
+                 If you don't know the answer, respond with 'I'm sorry, I don't have that answer'.
+             Chat history:
+            {chat_history}
+            Follow Up Input: {question}
+            Standalone question:"""
+    custom_prompt = PromptTemplate.from_template(custom_template)
+
+    llm = ChatOpenAI(temperature=1)
+    retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k':5})
+
+    crc = ConversationalRetrievalChain.from_llm(llm, retriever, condense_question_prompt=custom_prompt)
+    result = crc({'question': query, 'chat_history': chat_history})
+    answer = result['answer']
+    chat_history.append((query, result['answer']))
+     # After retrieving and modifying `chat_history`
+
+    # Save the updated chat history back to the session
+    session[collection_name] = chat_history
+
+    # print(result,chat_history)
+    # return result, chat_history
+    data = {"Created a new collection ":collection_name, 'answer': answer}
+    json_data = json.dumps(data, ensure_ascii=False).encode('utf8')
+    # qdrant = Qdrant.from_documents(chunks, embeddings, url=qdrant_url, collection_name=collection_name, vector_name="custom_vector", prefer_grpc=True, api_key=qdrant_api_key, force_recreate=True)
+
+    return Response(json_data, mimetype='application/json; charset=utf-8')
+
 @app.route('/summarize', methods=['POST'])
 @cross_origin(supports_credentials=True)  # Apply CORS to this specific route
 def retrieve_summary(chat_history=[]):
@@ -647,7 +813,7 @@ def retrieve_summary(chat_history=[]):
         client=qdrant_client, collection_name=collection_name,
         embeddings=cohere, vector_name=collection_name
             )
-    custom_template = """Vous êtes ici un assistant de document multilingue pour aider un humain à répondre à toutes ses questions concernant le document téléchargé. Compte tenu de la conversation suivante et d'une question de suivi, reformulez la question de suivi pour en faire une question autonome. Si vous ne connaissez pas la réponse, répondez par « Je suis désolé, je n'ai pas cette réponse '.
+    custom_template = """Here you are a multilingual document assistant to help a human answer all their questions regarding the downloaded document. Given the following conversation and a follow-up question, rephrase the follow-up question to make it a stand-alone question. If you don't know the answer, respond with "I'm sorry, I don't have that answer."'.
         Chat History:
         {chat_history}
         Follow Up Input: {question}
