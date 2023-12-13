@@ -143,7 +143,7 @@ def update_endpoint(collection_name):
                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
                             region_name='us-east-1')
 
-    default_bucket_name = "myflash" 
+    default_bucket_name = "myflash2" 
     key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
     
     try:
@@ -225,7 +225,7 @@ def ocr_endpoint():
                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY, 
                             region_name='us-east-1')
 
-    default_bucket_name = "myflash" 
+    default_bucket_name = "myflash2" 
     key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
     
     try:
@@ -342,7 +342,7 @@ def upload_pdf():
         region_name = 'us-east-1',
     )
 
-    default_bucket_name = "myflash" 
+    default_bucket_name = "myflash2" 
     key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
     
     try:
@@ -472,7 +472,7 @@ def update_pdf(collection_name):
         region_name = 'us-east-1',
     )
 
-    default_bucket_name = "myflash" 
+    default_bucket_name = "myflash2" 
     key = 'input-pdf-files/{}'.format(os.path.basename(input_pdf_file.filename))
     
     try:
